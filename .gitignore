@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+.DS_Store
+
+# Claude Code
+.claude/
+plans/
+
+# App data (user-specific)
+*.app
