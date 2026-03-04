@@ -80,19 +80,34 @@ struct PreferencesView: View {
 
             // Microphone sensitivity
             settingsGroup(title: "マイク", icon: "mic") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("入力感度")
-                            .font(.system(size: 13))
-                        Spacer()
-                        Text("\(String(format: "%.1f", prefs.inputSensitivity))x")
-                            .font(.system(size: 12, design: .monospaced))
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("入力感度")
+                                .font(.system(size: 13))
+                            Spacer()
+                            Text("\(String(format: "%.1f", prefs.inputSensitivity))x")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $prefs.inputSensitivity, in: 1.0...3.0, step: 0.1)
+                        Text("小さい声が認識されにくい場合は上げてください")
+                            .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
-                    Slider(value: $prefs.inputSensitivity, in: 1.0...3.0, step: 0.1)
-                    Text("小さい声が認識されにくい場合は上げてください")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    Toggle(isOn: $prefs.voiceProcessingEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("ノイズ抑制")
+                                .font(.system(size: 13))
+                            Text("Appleの音声処理で環境ノイズを低減")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
             }
 

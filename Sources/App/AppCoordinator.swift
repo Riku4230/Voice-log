@@ -36,6 +36,9 @@ final class AppCoordinator {
     /// Continuous recording mode (toggled by double-tap)
     private var isContinuousRecording = false
 
+    /// Timer for polling audio level from recorder
+    private var audioLevelTimer: Timer?
+
     // MARK: - Setup
 
     func start() {
@@ -241,9 +244,18 @@ final class AppCoordinator {
 
             let stream = try recognizer.startRecognition(contextualStrings: contextualStrings)
 
-            audioRecorder.updateSensitivity(UserPreferences.shared.inputSensitivity)
-            try audioRecorder.startRecording { buffer in
+            let prefs = UserPreferences.shared
+            audioRecorder.updateSensitivity(prefs.inputSensitivity)
+            try audioRecorder.startRecording(voiceProcessing: prefs.voiceProcessingEnabled) { buffer in
                 recognizer.appendBuffer(buffer)
+            }
+
+            // Poll audio level at ~15Hz for HUD display
+            audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.hudViewModel.audioLevel = self.audioRecorder.currentAudioLevel
+                }
             }
 
             transcriptionTask = Task { [weak self] in
@@ -307,6 +319,8 @@ final class AppCoordinator {
         audioRecorder.stopRecording()
         speechRecognizer?.stopRecognition()
         autoSaveTimer?.invalidate()
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
 
         // Wait briefly for recognizer to process remaining audio, then finalize
         Task {

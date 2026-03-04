@@ -21,6 +21,7 @@ final class TranscriptViewModel: ObservableObject {
     @Published var isContinuous: Bool = false
     @Published var focusedAppName: String = ""
     @Published var isLLMProcessing: Bool = false
+    @Published var audioLevel: Float = 0.0
 
     /// Called when user taps the cancel button on the HUD
     var onCancel: (() -> Void)?

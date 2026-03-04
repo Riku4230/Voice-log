@@ -16,12 +16,25 @@ final class AudioRecorder: @unchecked Sendable {
     private let maxRingSeconds: Double = 3.0
     private var ringSampleRate: Double = 48000.0
 
-    func startRecording(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
+    func startRecording(voiceProcessing: Bool = false, onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
         let engine = AVAudioEngine()
         self.engine = engine
         self.onBuffer = onBuffer
 
         let inputNode = engine.inputNode
+
+        // Enable Apple's built-in voice processing (AGC + noise suppression)
+        if voiceProcessing {
+            if inputNode.isVoiceProcessingEnabled != true {
+                do {
+                    try inputNode.setVoiceProcessingEnabled(true)
+                    AppLogger.info("Voice Processing IO enabled")
+                } catch {
+                    AppLogger.warning("Voice Processing IO failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         ringSampleRate = nativeFormat.sampleRate
 
@@ -39,12 +52,17 @@ final class AudioRecorder: @unchecked Sendable {
         }
 
         try engine.start()
-        AppLogger.info("AudioRecorder started (sampleRate=\(nativeFormat.sampleRate), preprocessing=enabled)")
+        AppLogger.info("AudioRecorder started (sampleRate=\(nativeFormat.sampleRate), voiceProcessing=\(voiceProcessing))")
     }
 
     /// Update the input sensitivity (output gain multiplier).
     func updateSensitivity(_ value: Double) {
         audioPreprocessor.config.outputGain = Float(value)
+    }
+
+    /// Current audio level (0.0-1.0) for UI display.
+    var currentAudioLevel: Float {
+        audioPreprocessor.currentLevel
     }
 
     func stopRecording() {

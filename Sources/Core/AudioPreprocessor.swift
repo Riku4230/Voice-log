@@ -27,6 +27,9 @@ final class AudioPreprocessor: @unchecked Sendable {
 
     var config = Config()
 
+    /// Current audio level (0.0-1.0) after processing. Read from main thread for UI.
+    private(set) var currentLevel: Float = 0.0
+
     // MARK: - Internal State
 
     private var sampleRate: Float = 48000.0
@@ -43,6 +46,11 @@ final class AudioPreprocessor: @unchecked Sendable {
     private var attackCoeff: Float = 0.0
     private var releaseCoeff: Float = 0.0
 
+    // Noise floor estimation
+    private var noiseFloor: Float = 0.0
+    private var noiseFloorUpdateCount: Int = 0
+    private let noiseFloorAlpha: Float = 0.01  // slow-tracking EMA for noise floor
+
     // MARK: - Prepare
 
     func prepare(sampleRate: Double, channelCount: Int = 1) {
@@ -56,6 +64,9 @@ final class AudioPreprocessor: @unchecked Sendable {
 
         // AGC
         smoothedGain = 1.0
+        currentLevel = 0.0
+        noiseFloor = 0.0
+        noiseFloorUpdateCount = 0
         agcMaxGainLinear = powf(10.0, config.agcMaxGainDB / 20.0)
         agcMinGainLinear = powf(10.0, config.agcMinGainDB / 20.0)
 
@@ -119,11 +130,37 @@ final class AudioPreprocessor: @unchecked Sendable {
     private func calculateAGCGain(_ samples: UnsafeMutablePointer<Float>, count: Int) -> Float {
         // Calculate RMS using vDSP
         var rms: Float = 0.0
-        var frameCount = vDSP_Length(count)
-        vDSP_rmsqv(samples, 1, &rms, frameCount)
+        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(count))
+
+        // Update noise floor estimate (slow-tracking minimum)
+        noiseFloorUpdateCount += 1
+        if noiseFloorUpdateCount < 20 {
+            // First ~0.4s: bootstrap noise floor from initial buffers
+            noiseFloor = noiseFloorUpdateCount == 1 ? rms : min(noiseFloor, rms)
+        } else if rms < noiseFloor * 1.5 {
+            // Track noise floor upward slowly when signal is near floor level
+            noiseFloor = noiseFloor * (1.0 - noiseFloorAlpha) + rms * noiseFloorAlpha
+        } else if rms < noiseFloor {
+            // Allow noise floor to decrease quickly
+            noiseFloor = rms
+        }
+
+        // Update current level for UI (normalized 0-1, post-filter pre-gain)
+        // Use log scale: map -60dBFS..0dBFS to 0..1
+        let dbFS = rms > 1e-8 ? 20.0 * log10f(rms) : -60.0
+        currentLevel = max(0.0, min(1.0, (dbFS + 60.0) / 60.0))
 
         // Avoid division by zero for silent buffers
         guard rms > 1e-8 else { return smoothedGain }
+
+        // Skip AGC boost if signal is at noise floor (avoid amplifying pure noise)
+        let isNoise = rms < noiseFloor * 2.0 && noiseFloorUpdateCount > 20
+        if isNoise {
+            // Gradually reduce gain toward 1.0 when only noise is present
+            let coeff = releaseCoeff
+            smoothedGain = coeff * smoothedGain + (1.0 - coeff) * 1.0
+            return smoothedGain
+        }
 
         // Calculate desired gain
         var desiredGain = config.agcTargetRMS / rms

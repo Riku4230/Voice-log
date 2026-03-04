@@ -16,6 +16,11 @@ struct TranscriptHUDView: View {
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
 
+                if viewModel.state == .recording {
+                    AudioLevelBar(level: viewModel.audioLevel)
+                        .frame(height: 4)
+                }
+
                 Spacer()
 
                 if viewModel.state == .recording {
@@ -172,6 +177,32 @@ struct TranscriptHUDView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+// MARK: - Audio Level Bar
+
+struct AudioLevelBar: View {
+    var level: Float  // 0.0 - 1.0
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.1))
+
+                Capsule()
+                    .fill(barColor)
+                    .frame(width: max(2, geo.size.width * CGFloat(level)))
+                    .animation(.linear(duration: 0.066), value: level)
+            }
+        }
+    }
+
+    private var barColor: Color {
+        if level > 0.8 { return .orange }
+        if level > 0.5 { return .green }
+        return .white.opacity(0.4)
     }
 }
 

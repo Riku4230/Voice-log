@@ -38,6 +38,7 @@ final class UserPreferences: ObservableObject {
 
     // Microphone
     @AppStorage("inputSensitivity") var inputSensitivity: Double = 1.5  // 1.0〜3.0
+    @AppStorage("voiceProcessingEnabled") var voiceProcessingEnabled: Bool = false
 
     // Behavior
     @AppStorage("llmTimeout") var llmTimeout: Double = 3.0
