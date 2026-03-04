@@ -384,16 +384,12 @@ final class AppCoordinator {
         let rawTranscript = shouldClear ? "" : processed
         AppLogger.info("END: SFSpeech=\(rawTranscript.count)chars")
 
-        guard !rawTranscript.isEmpty || (UserPreferences.shared.whisperEnabled && whisperRecognizer.isReady) else {
-            // No text and no Whisper — nothing to do
-            if rawTranscript.isEmpty {
-                stateMachine.transition(to: .idle)
-                menuBar.updateIcon(.idle)
-                menuBar.updateStatusText("待機中")
-                hudWindow?.hideHUD()
-                return
-            }
-            continueFinalization(rawTranscript: rawTranscript)
+        // If no SFSpeech text and Whisper isn't available, nothing to do
+        if rawTranscript.isEmpty && !(UserPreferences.shared.whisperEnabled && whisperRecognizer.isReady) {
+            stateMachine.transition(to: .idle)
+            menuBar.updateIcon(.idle)
+            menuBar.updateStatusText("待機中")
+            hudWindow?.hideHUD()
             return
         }
 
@@ -417,7 +413,10 @@ final class AppCoordinator {
                         sampleRate: sampleRate
                     )
                     await MainActor.run {
-                        let finalText = whisperText.isEmpty ? rawTranscript : whisperText
+                        let text = whisperText.isEmpty ? rawTranscript : whisperText
+                        // Apply voice commands to Whisper text (改行, まる, 取り消し)
+                        let (processed, shouldClear) = self.applyVoiceCommands(text)
+                        let finalText = shouldClear ? "" : processed
                         AppLogger.info("Whisper result: \(finalText.count)chars (SFSpeech was \(rawTranscript.count)chars)")
                         self.continueFinalization(rawTranscript: finalText)
                     }

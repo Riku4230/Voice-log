@@ -15,8 +15,9 @@ import SwiftWhisper
 //
 // Models should be placed in: ~/Library/Application Support/VoiceLog/models/
 
-final class WhisperRecognizer {
+final class WhisperRecognizer: @unchecked Sendable {
 
+    private let lock = NSLock()
     private var whisper: Whisper?
     private var loadedModelName: String?
 
@@ -68,14 +69,19 @@ final class WhisperRecognizer {
         params.no_timestamps = true
 
         let w = Whisper(fromFileURL: url, withParams: params)
+        lock.lock()
         self.whisper = w
         self.loadedModelName = name
+        lock.unlock()
         AppLogger.info("WhisperRecognizer: model loaded successfully")
     }
 
     /// Whether a model is currently loaded and ready.
     var isReady: Bool {
-        whisper != nil
+        lock.lock()
+        let ready = whisper != nil
+        lock.unlock()
+        return ready
     }
 
     // MARK: - Transcribe
@@ -87,7 +93,10 @@ final class WhisperRecognizer {
     ///   - sampleRate: Sample rate of the input audio (will be resampled to 16kHz if needed)
     /// - Returns: Transcribed text
     func transcribe(samples: [Float], sampleRate: Double) async throws -> String {
-        guard let whisper else {
+        lock.lock()
+        let w = whisper
+        lock.unlock()
+        guard let w else {
             throw WhisperRecognizerError.modelNotLoaded
         }
 
@@ -106,7 +115,7 @@ final class WhisperRecognizer {
 
         AppLogger.info("WhisperRecognizer: transcribing \(resampled.count) samples (\(String(format: "%.1f", Double(resampled.count) / targetRate))s)")
 
-        let segments = try await whisper.transcribe(audioFrames: resampled)
+        let segments = try await w.transcribe(audioFrames: resampled)
         let text = segments.map { $0.text }.joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
