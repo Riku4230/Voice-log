@@ -16,6 +16,11 @@ struct TranscriptHUDView: View {
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
 
+                if viewModel.state == .recording {
+                    AudioLevelBar(level: viewModel.audioLevel)
+                        .frame(height: 4)
+                }
+
                 Spacer()
 
                 if viewModel.state == .recording {
@@ -57,7 +62,17 @@ struct TranscriptHUDView: View {
                                     .foregroundColor(.white.opacity(0.45))
                             }
                             if viewModel.state == .processing {
-                                if viewModel.isLLMProcessing {
+                                if viewModel.isWhisperProcessing {
+                                    HStack(spacing: 6) {
+                                        ProgressView()
+                                            .controlSize(.mini)
+                                            .scaleEffect(0.7)
+                                        Text("Whisperで高精度認識中...")
+                                            .font(.system(size: 11).italic())
+                                            .foregroundColor(.green.opacity(0.6))
+                                    }
+                                    .padding(.top, 4)
+                                } else if viewModel.isLLMProcessing {
                                     HStack(spacing: 6) {
                                         ProgressView()
                                             .controlSize(.mini)
@@ -141,7 +156,7 @@ struct TranscriptHUDView: View {
                 ProgressView()
                     .controlSize(.small)
                     .scaleEffect(0.6)
-                Text(viewModel.isLLMProcessing ? "AIにより整形中..." : "整形中...")
+                Text(viewModel.isWhisperProcessing ? "Whisperで認識中..." : viewModel.isLLMProcessing ? "AIにより整形中..." : "整形中...")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
 
@@ -172,6 +187,32 @@ struct TranscriptHUDView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+// MARK: - Audio Level Bar
+
+struct AudioLevelBar: View {
+    var level: Float  // 0.0 - 1.0
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.1))
+
+                Capsule()
+                    .fill(barColor)
+                    .frame(width: max(2, geo.size.width * CGFloat(level)))
+                    .animation(.linear(duration: 0.066), value: level)
+            }
+        }
+    }
+
+    private var barColor: Color {
+        if level > 0.8 { return .orange }
+        if level > 0.5 { return .green }
+        return .white.opacity(0.4)
     }
 }
 

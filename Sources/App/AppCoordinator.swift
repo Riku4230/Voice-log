@@ -20,6 +20,9 @@ final class AppCoordinator {
     private var speechRecognizer: SpeechRecognizer?
     private var transcriptionTask: Task<Void, Never>?
 
+    /// Whisper batch recognizer for high-accuracy final transcription
+    private let whisperRecognizer = WhisperRecognizer()
+
     /// Text confirmed (auto-saved after silence) — never lost
     private var accumulatedFinalText = ""
     /// Latest partial from the current recognition session (full session text)
@@ -35,6 +38,9 @@ final class AppCoordinator {
 
     /// Continuous recording mode (toggled by double-tap)
     private var isContinuousRecording = false
+
+    /// Timer for polling audio level from recorder
+    private var audioLevelTimer: Timer?
 
     // MARK: - Setup
 
@@ -57,6 +63,7 @@ final class AppCoordinator {
         Task {
             await requestPermissions()
             setupHotkey()
+            await loadWhisperModelIfEnabled()
         }
     }
 
@@ -73,6 +80,34 @@ final class AppCoordinator {
         }
 
         let _ = PasteEngine.checkAccessibility()
+    }
+
+    // MARK: - Whisper Model Loading
+
+    private func loadWhisperModelIfEnabled() async {
+        let prefs = UserPreferences.shared
+        guard prefs.whisperEnabled else { return }
+
+        WhisperRecognizer.ensureModelsDirectory()
+        let modelName = prefs.whisperModelName
+
+        guard WhisperRecognizer.modelExists(name: modelName) else {
+            AppLogger.warning("Whisper model not found: \(modelName)")
+            AppLogger.info("Place model in: \(WhisperRecognizer.modelsDirectory.path)")
+            return
+        }
+
+        // Load model on background thread
+        let recognizer = self.whisperRecognizer
+        Task.detached {
+            do {
+                let locale = await UserPreferences.shared.transcriptionLocale
+                let lang = String(locale.prefix(2))  // "ja-JP" -> "ja"
+                try recognizer.loadModel(name: modelName, language: lang)
+            } catch {
+                AppLogger.error("Whisper model load failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - ESC Key Monitor
@@ -141,7 +176,7 @@ final class AppCoordinator {
 
     // MARK: - Auto-save
 
-    /// Flush current session text into accumulated (called by timer after 2s silence)
+    /// Flush current session text into accumulated (called by timer after 1s silence)
     private func flushCurrentSession() {
         guard currentSessionText.count > flushedSessionLength else { return }
         let newPortion = String(currentSessionText.dropFirst(flushedSessionLength))
@@ -153,7 +188,7 @@ final class AppCoordinator {
         } else {
             accumulatedFinalText += processed
             flushedSessionLength = currentSessionText.count
-            AppLogger.info("AUTOSAVE: +\(processed.count)chars → total=\(accumulatedFinalText.count)")
+            AppLogger.info("AUTOSAVE: +\(processed.count)chars -> total=\(accumulatedFinalText.count)")
         }
         hudViewModel.updateTranscript(final_: accumulatedFinalText, partial: "")
     }
@@ -222,6 +257,7 @@ final class AppCoordinator {
         currentSessionText = ""
         flushedSessionLength = 0
         autoSaveTimer?.invalidate()
+        audioRecorder.clearRecordedSamples()
         hudViewModel.isContinuous = continuous
         hudViewModel.startRecording()
         hudWindow?.showHUD()
@@ -241,8 +277,18 @@ final class AppCoordinator {
 
             let stream = try recognizer.startRecognition(contextualStrings: contextualStrings)
 
-            try audioRecorder.startRecording { buffer in
+            let prefs = UserPreferences.shared
+            audioRecorder.updateSensitivity(prefs.inputSensitivity)
+            try audioRecorder.startRecording(voiceProcessing: prefs.voiceProcessingEnabled) { buffer in
                 recognizer.appendBuffer(buffer)
+            }
+
+            // Poll audio level at ~15Hz for HUD display
+            audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.hudViewModel.audioLevel = self.audioRecorder.currentAudioLevel
+                }
             }
 
             transcriptionTask = Task { [weak self] in
@@ -260,7 +306,7 @@ final class AppCoordinator {
                             final_: self.accumulatedFinalText,
                             partial: unflushed
                         )
-                        // Reset auto-save timer: if no new partial for 2s, save to accumulated
+                        // Reset auto-save timer: if no new partial for 1s, save to accumulated
                         self.autoSaveTimer?.invalidate()
                         self.autoSaveTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
                             Task { @MainActor [weak self] in
@@ -280,7 +326,7 @@ final class AppCoordinator {
                                 AppLogger.info("CLEAR: voice command reset")
                             } else {
                                 self.accumulatedFinalText += processed
-                                AppLogger.info("FINAL: +\(processed.count)chars → total=\(self.accumulatedFinalText.count)")
+                                AppLogger.info("FINAL: +\(processed.count)chars -> total=\(self.accumulatedFinalText.count)")
                             }
                         }
                         self.currentSessionText = ""
@@ -306,6 +352,8 @@ final class AppCoordinator {
         audioRecorder.stopRecording()
         speechRecognizer?.stopRecognition()
         autoSaveTimer?.invalidate()
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
 
         // Wait briefly for recognizer to process remaining audio, then finalize
         Task {
@@ -330,12 +378,62 @@ final class AppCoordinator {
     }
 
     private func finalizeRecording() {
-        var rawTranscript = accumulatedFinalText
+        let sfSpeechText = accumulatedFinalText
         // Apply voice commands to the full output
-        let (processed, shouldClear) = applyVoiceCommands(rawTranscript)
-        rawTranscript = shouldClear ? "" : processed
-        AppLogger.info("END: total=\(rawTranscript.count)chars")
+        let (processed, shouldClear) = applyVoiceCommands(sfSpeechText)
+        let rawTranscript = shouldClear ? "" : processed
+        AppLogger.info("END: SFSpeech=\(rawTranscript.count)chars")
 
+        // If no SFSpeech text and Whisper isn't available, nothing to do
+        if rawTranscript.isEmpty && !(UserPreferences.shared.whisperEnabled && whisperRecognizer.isReady) {
+            stateMachine.transition(to: .idle)
+            menuBar.updateIcon(.idle)
+            menuBar.updateStatusText("待機中")
+            hudWindow?.hideHUD()
+            return
+        }
+
+        // If Whisper is enabled and ready, run batch transcription for higher accuracy
+        let prefs = UserPreferences.shared
+        if prefs.whisperEnabled && whisperRecognizer.isReady {
+            stateMachine.transition(to: .processing(rawTranscript: rawTranscript))
+            menuBar.updateIcon(.processing)
+            menuBar.updateStatusText("Whisperで認識中...")
+            hudViewModel.startProcessing(llm: false)
+            hudViewModel.isWhisperProcessing = true
+
+            let samples = audioRecorder.getRecordedSamples()
+            let sampleRate = audioRecorder.ringSampleRate
+            let recognizer = self.whisperRecognizer
+
+            Task.detached {
+                do {
+                    let whisperText = try await recognizer.transcribe(
+                        samples: samples,
+                        sampleRate: sampleRate
+                    )
+                    await MainActor.run {
+                        let text = whisperText.isEmpty ? rawTranscript : whisperText
+                        // Apply voice commands to Whisper text (改行, まる, 取り消し)
+                        let (processed, shouldClear) = self.applyVoiceCommands(text)
+                        let finalText = shouldClear ? "" : processed
+                        AppLogger.info("Whisper result: \(finalText.count)chars (SFSpeech was \(rawTranscript.count)chars)")
+                        self.continueFinalization(rawTranscript: finalText)
+                    }
+                } catch {
+                    await MainActor.run {
+                        AppLogger.warning("Whisper failed, using SFSpeech: \(error.localizedDescription)")
+                        self.continueFinalization(rawTranscript: rawTranscript)
+                    }
+                }
+            }
+        } else {
+            continueFinalization(rawTranscript: rawTranscript)
+        }
+    }
+
+    /// Continue finalization with the chosen transcript (from SFSpeech or Whisper).
+    private func continueFinalization(rawTranscript: String) {
         guard !rawTranscript.isEmpty else {
             stateMachine.transition(to: .idle)
             menuBar.updateIcon(.idle)
@@ -360,9 +458,15 @@ final class AppCoordinator {
         let usesLLM = (prefs.postProcessingMode != .local || voiceInstruction != nil)
             && !(voiceInstruction != nil && prefs.postProcessingMode == .local && prefs.claudeApiKey.isEmpty)
 
-        stateMachine.transition(to: .processing(rawTranscript: rawTranscript))
+        // Only transition to processing if not already in that state (Whisper may have set it)
+        if case .processing = stateMachine.state {
+            // Already processing (from Whisper path)
+        } else {
+            stateMachine.transition(to: .processing(rawTranscript: rawTranscript))
+        }
         menuBar.updateIcon(.processing)
         menuBar.updateStatusText(usesLLM ? "AIにより整形中..." : "整形中...")
+        hudViewModel.isWhisperProcessing = false
         hudViewModel.startProcessing(llm: usesLLM)
 
         if prefs.postProcessingMode == .local && voiceInstruction == nil {

@@ -78,6 +78,92 @@ struct PreferencesView: View {
                 HotkeyRecorderView(keyCode: $prefs.hotkeyCode)
             }
 
+            // Microphone sensitivity
+            settingsGroup(title: "マイク", icon: "mic") {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("入力感度")
+                                .font(.system(size: 13))
+                            Spacer()
+                            Text("\(String(format: "%.1f", prefs.inputSensitivity))x")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $prefs.inputSensitivity, in: 1.0...3.0, step: 0.1)
+                        Text("小さい声が認識されにくい場合は上げてください")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    Toggle(isOn: $prefs.voiceProcessingEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("ノイズ抑制")
+                                .font(.system(size: 13))
+                            Text("Appleの音声処理で環境ノイズを低減")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                }
+            }
+
+            // Whisper (local batch recognition)
+            settingsGroup(title: "Whisper (高精度認識)", icon: "waveform.badge.magnifyingglass") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: $prefs.whisperEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Whisper で最終認識")
+                                .font(.system(size: 13))
+                            Text("録音後にローカルWhisperで高精度な文字起こし")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+
+                    if prefs.whisperEnabled {
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("モデルファイル名")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                            TextField("ggml-large-v3-turbo.bin", text: $prefs.whisperModelName)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                        }
+
+                        whisperModelStatus
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("モデル配置先:")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Text("~/Library/Application Support/VoiceLog/models/")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .textSelection(.enabled)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("推奨モデル (日本語):")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text("ggml-large-v3-turbo.bin — 最速・高精度")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                            Text("ggml-medium.bin — バランス型")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
             // Behavior
             settingsGroup(title: "動作", icon: "slider.horizontal.3") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -210,6 +296,20 @@ struct PreferencesView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Whisper Model Status
+
+    private var whisperModelStatus: some View {
+        let exists = WhisperRecognizer.modelExists(name: prefs.whisperModelName)
+        return HStack(spacing: 6) {
+            Image(systemName: exists ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(exists ? .green : .orange)
+            Text(exists ? "モデル検出済み" : "モデルが見つかりません")
+                .font(.system(size: 11))
+                .foregroundStyle(exists ? .green : .orange)
         }
     }
 
