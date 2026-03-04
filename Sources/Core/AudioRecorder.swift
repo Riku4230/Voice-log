@@ -7,6 +7,9 @@ final class AudioRecorder: @unchecked Sendable {
     private var engine: AVAudioEngine?
     private var onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
+    /// Audio preprocessor for boosting quiet voice recognition
+    private let audioPreprocessor = AudioPreprocessor()
+
     /// Ring buffer holding recent audio for replay on session rotation
     private let ringLock = NSLock()
     private var ringBuffers: [AVAudioPCMBuffer] = []
@@ -26,13 +29,22 @@ final class AudioRecorder: @unchecked Sendable {
         ringBuffers.removeAll()
         ringLock.unlock()
 
+        let preprocessor = self.audioPreprocessor
+        preprocessor.prepare(sampleRate: nativeFormat.sampleRate, channelCount: Int(nativeFormat.channelCount))
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: nativeFormat) { [weak self] buffer, _ in
+            preprocessor.process(buffer)
             self?.pushToRing(buffer)
             onBuffer(buffer)
         }
 
         try engine.start()
-        AppLogger.info("AudioRecorder started (sampleRate=\(nativeFormat.sampleRate))")
+        AppLogger.info("AudioRecorder started (sampleRate=\(nativeFormat.sampleRate), preprocessing=enabled)")
+    }
+
+    /// Update the input sensitivity (output gain multiplier).
+    func updateSensitivity(_ value: Double) {
+        audioPreprocessor.config.outputGain = Float(value)
     }
 
     func stopRecording() {

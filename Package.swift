@@ -14,6 +14,7 @@ let package = Package(
                 .linkedFramework("Speech"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("Accelerate"),
             ]
         )
     ]

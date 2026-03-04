@@ -241,6 +241,7 @@ final class AppCoordinator {
 
             let stream = try recognizer.startRecognition(contextualStrings: contextualStrings)
 
+            audioRecorder.updateSensitivity(UserPreferences.shared.inputSensitivity)
             try audioRecorder.startRecording { buffer in
                 recognizer.appendBuffer(buffer)
             }

@@ -36,6 +36,9 @@ final class UserPreferences: ObservableObject {
     // Transcription
     @AppStorage("transcriptionLocale") var transcriptionLocale: String = "ja-JP"
 
+    // Microphone
+    @AppStorage("inputSensitivity") var inputSensitivity: Double = 1.5  // 1.0〜3.0
+
     // Behavior
     @AppStorage("llmTimeout") var llmTimeout: Double = 3.0
     @AppStorage("readyToPasteTimeout") var readyToPasteTimeout: Double = 300.0  // 5 min

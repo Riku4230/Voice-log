@@ -78,6 +78,24 @@ struct PreferencesView: View {
                 HotkeyRecorderView(keyCode: $prefs.hotkeyCode)
             }
 
+            // Microphone sensitivity
+            settingsGroup(title: "マイク", icon: "mic") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("入力感度")
+                            .font(.system(size: 13))
+                        Spacer()
+                        Text("\(String(format: "%.1f", prefs.inputSensitivity))x")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $prefs.inputSensitivity, in: 1.0...3.0, step: 0.1)
+                    Text("小さい声が認識されにくい場合は上げてください")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Behavior
             settingsGroup(title: "動作", icon: "slider.horizontal.3") {
                 VStack(alignment: .leading, spacing: 12) {
