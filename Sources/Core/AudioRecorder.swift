@@ -7,14 +7,18 @@ final class AudioRecorder: @unchecked Sendable {
     private var engine: AVAudioEngine?
     private var onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
-    /// Audio preprocessor for boosting quiet voice recognition
+    /// Audio preprocessor (highpass filter + user sensitivity gain)
     private let audioPreprocessor = AudioPreprocessor()
 
     /// Ring buffer holding recent audio for replay on session rotation
     private let ringLock = NSLock()
     private var ringBuffers: [AVAudioPCMBuffer] = []
     private let maxRingSeconds: Double = 3.0
-    private var ringSampleRate: Double = 48000.0
+    private(set) var ringSampleRate: Double = 48000.0
+
+    /// Accumulated raw audio samples for Whisper batch processing (mono, channel 0)
+    private let whisperLock = NSLock()
+    private var whisperSamples: [Float] = []
 
     func startRecording(voiceProcessing: Bool = false, onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
         let engine = AVAudioEngine()
@@ -42,10 +46,18 @@ final class AudioRecorder: @unchecked Sendable {
         ringBuffers.removeAll()
         ringLock.unlock()
 
+        whisperLock.lock()
+        whisperSamples.removeAll()
+        whisperLock.unlock()
+
         let preprocessor = self.audioPreprocessor
         preprocessor.prepare(sampleRate: nativeFormat.sampleRate, channelCount: Int(nativeFormat.channelCount))
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: nativeFormat) { [weak self] buffer, _ in
+            // Accumulate raw audio for Whisper (before processing)
+            self?.accumulateForWhisper(buffer)
+
+            // Process for SFSpeech (highpass + gain, no AGC)
             preprocessor.process(buffer)
             self?.pushToRing(buffer)
             onBuffer(buffer)
@@ -98,5 +110,35 @@ final class AudioRecorder: @unchecked Sendable {
         let copy = ringBuffers
         ringLock.unlock()
         return copy
+    }
+
+    // MARK: - Whisper Audio Accumulation
+
+    /// Store raw audio samples (channel 0, mono) for Whisper batch processing.
+    private func accumulateForWhisper(_ buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData else { return }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return }
+
+        whisperLock.lock()
+        let ptr = channelData[0]
+        whisperSamples.append(contentsOf: UnsafeBufferPointer(start: ptr, count: frameCount))
+        whisperLock.unlock()
+    }
+
+    /// Get all accumulated raw audio samples and the recording sample rate.
+    /// Call after stopRecording().
+    func getRecordedSamples() -> [Float] {
+        whisperLock.lock()
+        let copy = whisperSamples
+        whisperLock.unlock()
+        return copy
+    }
+
+    /// Clear accumulated Whisper audio (called when starting a new recording).
+    func clearRecordedSamples() {
+        whisperLock.lock()
+        whisperSamples.removeAll()
+        whisperLock.unlock()
     }
 }

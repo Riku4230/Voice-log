@@ -40,6 +40,10 @@ final class UserPreferences: ObservableObject {
     @AppStorage("inputSensitivity") var inputSensitivity: Double = 1.5  // 1.0〜3.0
     @AppStorage("voiceProcessingEnabled") var voiceProcessingEnabled: Bool = false
 
+    // Whisper (local batch recognition)
+    @AppStorage("whisperEnabled") var whisperEnabled: Bool = false
+    @AppStorage("whisperModelName") var whisperModelName: String = "ggml-large-v3-turbo.bin"
+
     // Behavior
     @AppStorage("llmTimeout") var llmTimeout: Double = 3.0
     @AppStorage("readyToPasteTimeout") var readyToPasteTimeout: Double = 300.0  // 5 min

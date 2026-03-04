@@ -62,7 +62,17 @@ struct TranscriptHUDView: View {
                                     .foregroundColor(.white.opacity(0.45))
                             }
                             if viewModel.state == .processing {
-                                if viewModel.isLLMProcessing {
+                                if viewModel.isWhisperProcessing {
+                                    HStack(spacing: 6) {
+                                        ProgressView()
+                                            .controlSize(.mini)
+                                            .scaleEffect(0.7)
+                                        Text("Whisperで高精度認識中...")
+                                            .font(.system(size: 11).italic())
+                                            .foregroundColor(.green.opacity(0.6))
+                                    }
+                                    .padding(.top, 4)
+                                } else if viewModel.isLLMProcessing {
                                     HStack(spacing: 6) {
                                         ProgressView()
                                             .controlSize(.mini)
@@ -146,7 +156,7 @@ struct TranscriptHUDView: View {
                 ProgressView()
                     .controlSize(.small)
                     .scaleEffect(0.6)
-                Text(viewModel.isLLMProcessing ? "AIにより整形中..." : "整形中...")
+                Text(viewModel.isWhisperProcessing ? "Whisperで認識中..." : viewModel.isLLMProcessing ? "AIにより整形中..." : "整形中...")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
 
